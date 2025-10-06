@@ -15,6 +15,7 @@ class KeychainService {
     
     private let service = "ChatApp"
     private let tokenKey = "auth_token"
+    private let refreshTokenKey = "refresh_token"
     private let usernameKey = "username"
     
     // MARK: - Save Token
@@ -25,6 +26,16 @@ class KeychainService {
     // MARK: - Get Token
     func getToken() -> String? {
         return getFromKeychain(key: tokenKey)
+    }
+    
+    // MARK: - Save Refresh Token
+    func saveRefreshToken(_ refreshToken: String) {
+        saveToKeychain(key: refreshTokenKey, value: refreshToken)
+    }
+    
+    // MARK: - Get Refresh Token
+    func getRefreshToken() -> String? {
+        return getFromKeychain(key: refreshTokenKey)
     }
     
     // MARK: - Save Username
@@ -40,6 +51,7 @@ class KeychainService {
     // MARK: - Clear All
     func clearAll() {
         deleteFromKeychain(key: tokenKey)
+        deleteFromKeychain(key: refreshTokenKey)
         deleteFromKeychain(key: usernameKey)
     }
     

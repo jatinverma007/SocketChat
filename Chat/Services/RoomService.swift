@@ -1,5 +1,5 @@
 //
-//  MessageService.swift
+//  RoomService.swift
 //  ChatApp
 //
 //  Created by Developer on 2024
@@ -7,7 +7,7 @@
 
 import Foundation
 
-class MessageService: ObservableObject {
+class RoomService: ObservableObject {
     private let session: URLSession
     
     init() {
@@ -20,52 +20,50 @@ class MessageService: ObservableObject {
         self.session = URLSession(configuration: config)
     }
     
-    // MARK: - Fetch All Messages
-    func fetchMessages(for roomId: String, token: String) async throws -> [ChatMessage] {
-        let url = URL(string: "\(ServerConfig.messages)/\(roomId)")!
+    // MARK: - Get All Rooms
+    func getRooms(token: String) async throws -> [ChatRoom] {
+        let url = URL(string: ServerConfig.rooms)!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
-        print("💬 Fetch Messages Request to: \(url)")
-        print("💬 Authorization Header: Bearer \(token.prefix(20))...")
+        print("🏠 Get Rooms Request to: \(url)")
+        print("🏠 Authorization Header: Bearer \(token.prefix(20))...")
         
         let (data, response) = try await session.data(for: request)
         
         // Debug: Print the raw response
         if let responseString = String(data: data, encoding: .utf8) {
-            print("💬 Fetch Messages Response: \(responseString)")
+            print("🏠 Get Rooms Response: \(responseString)")
         }
         
         guard let httpResponse = response as? HTTPURLResponse else {
             print("❌ Invalid HTTP response")
-            throw MessageError.fetchFailed
+            throw RoomError.fetchFailed
         }
         
-        print("💬 Fetch Messages Status Code: \(httpResponse.statusCode)")
+        print("🏠 Get Rooms Status Code: \(httpResponse.statusCode)")
         
         guard httpResponse.statusCode == 200 else {
-            print("❌ Fetch Messages failed with status code: \(httpResponse.statusCode)")
+            print("❌ Get Rooms failed with status code: \(httpResponse.statusCode)")
             
             // Handle 401 Unauthorized - try to refresh token
             if httpResponse.statusCode == 401 {
                 print("🔄 Token expired, attempting to refresh...")
                 if let newToken = await attemptTokenRefresh() {
                     print("🔄 Token refreshed successfully, retrying request...")
-                    return try await fetchMessages(for: roomId, token: newToken)
+                    return try await getRooms(token: newToken)
                 } else {
                     print("❌ Token refresh failed, user needs to login again")
-                    throw MessageError.unauthorized
+                    throw RoomError.unauthorized
                 }
             }
             
-            throw MessageError.fetchFailed
+            throw RoomError.fetchFailed
         }
         
-        // Parse server messages and convert to ChatMessage
         do {
-            let serverMessages = try JSONDecoder().decode([ServerMessage].self, from: data)
-            return serverMessages.map { $0.toChatMessage() }
+            return try JSONDecoder().decode([ChatRoom].self, from: data)
         } catch {
             print("❌ JSON Decoding Error: \(error)")
             print("❌ Raw data: \(String(data: data, encoding: .utf8) ?? "Unable to convert to string")")
@@ -73,44 +71,64 @@ class MessageService: ObservableObject {
         }
     }
     
-    // MARK: - Fetch Recent Messages
-    func fetchRecentMessages(for roomId: String, token: String) async throws -> [ChatMessage] {
-        let url = URL(string: "\(ServerConfig.messages)/\(roomId)/recent")!
+    // MARK: - Create Room
+    func createRoom(name: String, token: String) async throws -> ChatRoom {
+        let url = URL(string: ServerConfig.rooms)!
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
-        print("💬 Fetch Recent Messages Request to: \(url)")
-        print("💬 Authorization Header: Bearer \(token.prefix(20))...")
+        let roomRequest = ChatRoomCreate(name: name)
+        request.httpBody = try JSONEncoder().encode(roomRequest)
+        
+        print("🏠 Create Room Request to: \(url)")
+        print("🏠 Create Room Request Body: \(String(data: request.httpBody!, encoding: .utf8) ?? "Unable to encode")")
+        print("🏠 Authorization Header: Bearer \(token.prefix(20))...")
         
         let (data, response) = try await session.data(for: request)
         
         // Debug: Print the raw response
         if let responseString = String(data: data, encoding: .utf8) {
-            print("💬 Fetch Recent Messages Response: \(responseString)")
+            print("🏠 Create Room Response: \(responseString)")
         }
         
         guard let httpResponse = response as? HTTPURLResponse else {
             print("❌ Invalid HTTP response")
-            throw MessageError.fetchFailed
+            throw RoomError.createFailed
         }
         
-        print("💬 Fetch Recent Messages Status Code: \(httpResponse.statusCode)")
+        print("🏠 Create Room Status Code: \(httpResponse.statusCode)")
         
         guard httpResponse.statusCode == 200 else {
-            print("❌ Fetch Recent Messages failed with status code: \(httpResponse.statusCode)")
-            throw MessageError.fetchFailed
+            print("❌ Create Room failed with status code: \(httpResponse.statusCode)")
+            throw RoomError.createFailed
         }
         
-        // Parse server messages and convert to ChatMessage
         do {
-            let serverMessages = try JSONDecoder().decode([ServerMessage].self, from: data)
-            return serverMessages.map { $0.toChatMessage() }
+            return try JSONDecoder().decode(ChatRoom.self, from: data)
         } catch {
             print("❌ JSON Decoding Error: \(error)")
             print("❌ Raw data: \(String(data: data, encoding: .utf8) ?? "Unable to convert to string")")
             throw error
         }
+    }
+    
+    // MARK: - Get Room by ID
+    func getRoom(roomId: String, token: String) async throws -> ChatRoom {
+        let url = URL(string: "\(ServerConfig.rooms)/\(roomId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        let (data, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw RoomError.fetchFailed
+        }
+        
+        return try JSONDecoder().decode(ChatRoom.self, from: data)
     }
     
     // MARK: - Token Refresh Helper
@@ -142,19 +160,19 @@ class MessageService: ObservableObject {
     }
 }
 
-// MARK: - Message Errors
-enum MessageError: Error, LocalizedError {
+// MARK: - Room Errors
+enum RoomError: Error, LocalizedError {
     case fetchFailed
-    case sendFailed
+    case createFailed
     case networkError
     case unauthorized
     
     var errorDescription: String? {
         switch self {
         case .fetchFailed:
-            return "Failed to fetch messages."
-        case .sendFailed:
-            return "Failed to send message."
+            return "Failed to fetch rooms."
+        case .createFailed:
+            return "Failed to create room."
         case .networkError:
             return "Network error. Please check your connection."
         case .unauthorized:

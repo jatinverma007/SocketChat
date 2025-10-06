@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct ChatApp: App {
+    @StateObject private var authViewModel = AuthViewModel()
+    @StateObject private var chatViewModel = ChatViewModel()
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(authViewModel)
+                .environmentObject(chatViewModel)
+                .background(Color(.systemBackground))
         }
     }
 }

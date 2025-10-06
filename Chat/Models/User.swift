@@ -19,10 +19,40 @@ struct User: Codable, Identifiable {
     }
 }
 
+// MARK: - User Creation Request
+struct UserCreate: Codable {
+    let username: String
+    let password: String
+    
+    init(username: String, password: String) {
+        self.username = username
+        self.password = password
+    }
+}
+
 // MARK: - Auth Response Models
 struct AuthResponse: Codable {
-    let token: String
-    let user: User
+    let access_token: String
+    let refresh_token: String?
+    let token_type: String
+    let user: User?
+    
+    // Computed property for backward compatibility
+    var token: String {
+        return access_token
+    }
+}
+
+// MARK: - Refresh Token Request
+struct RefreshTokenRequest: Codable {
+    let refresh_token: String
+}
+
+// MARK: - Refresh Token Response
+struct RefreshTokenResponse: Codable {
+    let access_token: String
+    let refresh_token: String?
+    let token_type: String
 }
 
 struct LoginRequest: Codable {

@@ -52,6 +52,16 @@ struct EnhancedMessageBubbleView: View {
     
     var body: some View {
         ZStack {
+            // Background overlay to dismiss reaction picker when tapping outside
+            if showingReactionPicker {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        print("🔖 MessageBubble: Background tapped, dismissing reaction picker")
+                        showingReactionPicker = false
+                    }
+            }
+            
         HStack {
             if isFromCurrentUser {
                 Spacer(minLength: 50)
@@ -178,6 +188,18 @@ struct EnhancedMessageBubbleView: View {
                     showingRemoveReactionSheet = false
                 }
             )
+        }
+        .fullScreenCover(isPresented: $showingVideoPlayer) {
+            if let attachment = message.attachment,
+               let videoURL = attachment.url {
+                let fullURL = videoURL.hasPrefix("/api/files/") ? 
+                    "\(ServerConfig.httpBaseURL)\(videoURL)" : 
+                    ServerConfig.getFileURL(for: videoURL)
+                
+                if let url = URL(string: fullURL) {
+                    FullScreenVideoPlayer(videoURL: url, isPresented: $showingVideoPlayer)
+                }
+            }
         }
         // Removed background tap gesture to prevent interference with reaction picker
     }
@@ -1227,6 +1249,102 @@ struct FullScreenImageView: View {
                         isPresented = false
                     }
                     .foregroundColor(.white)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Full Screen Video Player
+struct FullScreenVideoPlayer: View {
+    let videoURL: URL
+    @Binding var isPresented: Bool
+    @State private var player: AVPlayer?
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                
+                if let player = player {
+                    VideoPlayer(player: player)
+                        .ignoresSafeArea()
+                } else {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.5)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        player?.pause()
+                        isPresented = false
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+            .onAppear {
+                print("🎥 Video player appeared with URL: \(videoURL)")
+                setupPlayer()
+            }
+            .onDisappear {
+                print("🎥 Video player disappeared, cleaning up")
+                player?.pause()
+                player = nil
+            }
+        }
+    }
+    
+    private func setupPlayer() {
+        let newPlayer = AVPlayer(url: videoURL)
+        self.player = newPlayer
+        
+        // Check if the item can be played
+        let playerItem = newPlayer.currentItem
+        print("🎥 Player item status: \(playerItem?.status.rawValue ?? -1)")
+        print("🎥 Player item error: \(playerItem?.error?.localizedDescription ?? "none")")
+        
+        // Add notification for when video is ready to play
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemNewAccessLogEntry,
+            object: playerItem,
+            queue: .main
+        ) { _ in
+            print("🎥 New access log entry - video is loading")
+        }
+        
+        // Add notification for playback errors
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { notification in
+            if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
+                print("❌ Video failed to play: \(error.localizedDescription)")
+            }
+        }
+        
+        // Start playing automatically
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            print("🎥 Attempting to play video...")
+            print("🎥 Player rate before play: \(newPlayer.rate)")
+            newPlayer.play()
+            print("🎥 Player rate after play: \(newPlayer.rate)")
+            
+            // Check status after attempting to play
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                print("🎥 Player status: \(newPlayer.status.rawValue)")
+                print("🎥 Player current time: \(newPlayer.currentTime().seconds)")
+                print("🎥 Player error: \(newPlayer.error?.localizedDescription ?? "none")")
+                print("🎥 Player item error: \(newPlayer.currentItem?.error?.localizedDescription ?? "none")")
+                
+                if let item = newPlayer.currentItem {
+                    print("🎥 Item duration: \(item.duration.seconds)")
+                    print("🎥 Item is playback likely to keep up: \(item.isPlaybackLikelyToKeepUp)")
+                    print("🎥 Item is playback buffer empty: \(item.isPlaybackBufferEmpty)")
+                    print("🎥 Item is playback buffer full: \(item.isPlaybackBufferFull)")
                 }
             }
         }

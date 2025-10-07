@@ -184,7 +184,7 @@ struct ChatView: View {
                         showingImagePicker = true
                     },
                     .default(Text("🎥 Video")) {
-                        imagePickerSourceType = .photoLibrary
+                        imagePickerSourceType = .camera
                         showingImagePicker = true
                     },
                     .default(Text("🎤 Record Audio")) {

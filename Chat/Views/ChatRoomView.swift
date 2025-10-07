@@ -68,6 +68,10 @@ struct ChatRoomView: View {
                             .environmentObject(chatViewModel)
                             .onAppear {
                                 chatViewModel.joinRoom(room)
+                                // Mark messages as read when entering the room
+                                Task {
+                                    await markRoomAsRead(roomId: room.id)
+                                }
                             }
                             .onDisappear {
                                 // Refresh room list when returning from chat
@@ -279,6 +283,30 @@ struct ChatRoomView: View {
         }
     }
     
+    // MARK: - Mark Room as Read
+    private func markRoomAsRead(roomId: String) async {
+        guard let token = KeychainService.shared.getToken() else {
+            return
+        }
+        
+        do {
+            try await roomService.markMessagesAsRead(roomId: roomId, token: token)
+            
+            // Update the unread count locally to 0 for immediate UI feedback
+            await MainActor.run {
+                if let index = availableRooms.firstIndex(where: { $0.id == roomId }) {
+                    var updatedRoom = availableRooms[index]
+                    updatedRoom.unreadCount = 0
+                    availableRooms[index] = updatedRoom
+                    print("✅ Updated unread count to 0 for room: \(roomId)")
+                }
+            }
+        } catch {
+            print("❌ Failed to mark messages as read: \(error)")
+            // Silently fail - user can still use the app
+        }
+    }
+    
     // MARK: - Create Room
     private func createRoom(name: String) {
         guard let token = KeychainService.shared.getToken() else {
@@ -345,10 +373,24 @@ struct RoomRowView: View {
             
             Spacer()
             
-            if let lastMessage = room.lastMessage, let timestamp = lastMessage.parsedTimestamp {
-                Text(formatTimestamp(timestamp))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+            VStack(alignment: .trailing, spacing: 4) {
+                if let lastMessage = room.lastMessage, let timestamp = lastMessage.parsedTimestamp {
+                    Text(formatTimestamp(timestamp))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Unread count badge (WhatsApp style)
+                if room.unreadCount > 0 {
+                    Text("\(room.unreadCount)")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.green)
+                        .clipShape(Capsule())
+                }
             }
         }
         .padding(.vertical, 8)

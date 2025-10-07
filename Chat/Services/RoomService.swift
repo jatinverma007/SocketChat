@@ -131,6 +131,35 @@ class RoomService: ObservableObject {
         return try JSONDecoder().decode(ChatRoom.self, from: data)
     }
     
+    // MARK: - Mark Messages as Read
+    func markMessagesAsRead(roomId: String, token: String) async throws {
+        let url = URL(string: "\(ServerConfig.rooms)/\(roomId)/read")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        print("📖 Marking messages as read for room: \(roomId)")
+        
+        let (data, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("❌ Invalid HTTP response for mark as read")
+            throw RoomError.networkError
+        }
+        
+        print("📖 Mark as read status code: \(httpResponse.statusCode)")
+        
+        guard httpResponse.statusCode == 200 else {
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("❌ Mark as read failed - Response: \(responseString)")
+            }
+            throw RoomError.fetchFailed
+        }
+        
+        print("✅ Messages marked as read successfully for room: \(roomId)")
+    }
+    
     // MARK: - Token Refresh Helper
     private func attemptTokenRefresh() async -> String? {
         let keychainService = KeychainService.shared

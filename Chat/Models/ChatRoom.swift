@@ -36,12 +36,14 @@ struct ChatRoom: Codable, Identifiable {
     let name: String
     let created_at: String?
     var lastMessage: LastMessage?
+    var unreadCount: Int
     
-    init(id: String = UUID().uuidString, name: String, created_at: String? = nil, lastMessage: LastMessage? = nil) {
+    init(id: String = UUID().uuidString, name: String, created_at: String? = nil, lastMessage: LastMessage? = nil, unreadCount: Int = 0) {
         self.id = id
         self.name = name
         self.created_at = created_at
         self.lastMessage = lastMessage
+        self.unreadCount = unreadCount
     }
     
     // Custom decoder to handle numeric ID from server
@@ -60,11 +62,13 @@ struct ChatRoom: Codable, Identifiable {
         self.name = try container.decode(String.self, forKey: .name)
         self.created_at = try container.decodeIfPresent(String.self, forKey: .created_at)
         self.lastMessage = try container.decodeIfPresent(LastMessage.self, forKey: .lastMessage)
+        self.unreadCount = try container.decodeIfPresent(Int.self, forKey: .unreadCount) ?? 0
     }
     
     private enum CodingKeys: String, CodingKey {
         case id, name, created_at
         case lastMessage = "last_message"
+        case unreadCount = "unread_count"
     }
 }
 

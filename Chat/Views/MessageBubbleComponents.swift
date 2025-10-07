@@ -79,7 +79,7 @@ struct EnhancedMessageBubbleView: View {
                 // Reserve minimal space below the bubble for the overlapping reactions pill
                 .padding(.bottom, reactions.isEmpty ? 0 : 6)
                 .overlay(
-                    // Reaction overlay positioned at bottom right
+                    // Reaction overlay positioned based on message side
                     ReactionOverlayView(
                         reactions: reactions,
                         userReaction: userReaction,
@@ -94,7 +94,7 @@ struct EnhancedMessageBubbleView: View {
                             handleReactionTap(reactionType)
                         }
                     ),
-                    alignment: .bottomTrailing
+                    alignment: isFromCurrentUser ? .bottomTrailing : .bottomLeading
                 )
                 .onLongPressGesture {
                     print("🔖 MessageBubble: Long press detected on message: \(message.id)")
@@ -258,6 +258,7 @@ private struct ReactionOverlayView: View {
                         )
                     }
                 }
+                .fixedSize(horizontal: true, vertical: false) // Allow horizontal expansion
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
                 .background(
@@ -271,7 +272,7 @@ private struct ReactionOverlayView: View {
                 )
                 // Overlap slightly with the bottom of the message bubble
                 .offset(y: 2)
-                .padding(.trailing, 2)
+                .padding(isFromCurrentUser ? .trailing : .leading, 2)
                 .zIndex(10) // Higher z-index to appear over message
             }
         }

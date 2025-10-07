@@ -7,15 +7,41 @@
 
 import Foundation
 
+// MARK: - Last Message Model
+struct LastMessage: Codable {
+    let messageId: Int
+    let sender: String
+    let message: String
+    let messageType: String
+    let timestamp: String
+    
+    var parsedTimestamp: Date? {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        dateFormatter.timeZone = TimeZone(abbreviation: "UTC")
+        return dateFormatter.date(from: timestamp)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case messageId = "message_id"
+        case sender
+        case message
+        case messageType = "message_type"
+        case timestamp
+    }
+}
+
 struct ChatRoom: Codable, Identifiable {
     let id: String
     let name: String
     let created_at: String?
+    var lastMessage: LastMessage?
     
-    init(id: String = UUID().uuidString, name: String, created_at: String? = nil) {
+    init(id: String = UUID().uuidString, name: String, created_at: String? = nil, lastMessage: LastMessage? = nil) {
         self.id = id
         self.name = name
         self.created_at = created_at
+        self.lastMessage = lastMessage
     }
     
     // Custom decoder to handle numeric ID from server
@@ -33,10 +59,12 @@ struct ChatRoom: Codable, Identifiable {
         
         self.name = try container.decode(String.self, forKey: .name)
         self.created_at = try container.decodeIfPresent(String.self, forKey: .created_at)
+        self.lastMessage = try container.decodeIfPresent(LastMessage.self, forKey: .lastMessage)
     }
     
     private enum CodingKeys: String, CodingKey {
         case id, name, created_at
+        case lastMessage = "last_message"
     }
 }
 

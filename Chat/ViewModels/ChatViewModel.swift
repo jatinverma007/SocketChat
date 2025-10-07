@@ -478,6 +478,9 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Handle Incoming Message
     private func handleIncomingMessage(_ message: ChatMessage) {
+        // Post notification that a new message was received (for any room)
+        NotificationCenter.default.post(name: NSNotification.Name("NewMessageReceived"), object: nil, userInfo: ["message": message])
+        
         // Only add message if it's for the current room
         if let currentRoomId = currentRoom?.id, message.roomId == currentRoomId {
             // Check if this is a server confirmation of a locally created message

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 struct ChatRoomView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
@@ -16,6 +17,9 @@ struct ChatRoomView: View {
     @State private var roomError: String?
     @State private var showingCreateRoom = false
     @State private var newRoomName = ""
+    @State private var cancellables = Set<AnyCancellable>()
+    @State private var refreshTimer: Timer?
+    @State private var lastRefreshTime = Date()
     
     var body: some View {
         NavigationView {
@@ -64,6 +68,12 @@ struct ChatRoomView: View {
                             .environmentObject(chatViewModel)
                             .onAppear {
                                 chatViewModel.joinRoom(room)
+                            }
+                            .onDisappear {
+                                // Refresh room list when returning from chat
+                                Task {
+                                    await refreshRooms()
+                                }
                             }
                         ) {
                             RoomRowView(room: room)
@@ -132,9 +142,15 @@ struct ChatRoomView: View {
         .background(Color(.systemBackground))
         .onAppear {
             loadRooms()
+            setupMessageListener()
+            setupForegroundListener()
+            startPeriodicRefresh()
         }
         .onDisappear {
-            chatViewModel.disconnectFromWebSocket()
+            stopPeriodicRefresh()
+        }
+        .refreshable {
+            await refreshRooms()
         }
     }
     
@@ -153,7 +169,16 @@ struct ChatRoomView: View {
                 let rooms = try await roomService.getRooms(token: token)
                 
                 await MainActor.run {
-                    self.availableRooms = rooms
+                    // Sort rooms by last message timestamp (most recent first)
+                    self.availableRooms = rooms.sorted { room1, room2 in
+                        guard let timestamp1 = room1.lastMessage?.parsedTimestamp else {
+                            return false // Rooms without messages go to the end
+                        }
+                        guard let timestamp2 = room2.lastMessage?.parsedTimestamp else {
+                            return true // Rooms with messages come before those without
+                        }
+                        return timestamp1 > timestamp2 // Most recent first
+                    }
                     self.isLoadingRooms = false
                 }
                 
@@ -163,6 +188,94 @@ struct ChatRoomView: View {
                     self.roomError = error.localizedDescription
                 }
             }
+        }
+    }
+    
+    // MARK: - Listeners Setup
+    private func setupMessageListener() {
+        // Subscribe to incoming messages from any room
+        // This will trigger immediate room list refresh when any message arrives
+        NotificationCenter.default
+            .publisher(for: NSNotification.Name("NewMessageReceived"))
+            .sink { notification in
+                print("📬 Room Listing: ✨ New message notification received!")
+                if let userInfo = notification.userInfo,
+                   let message = userInfo["message"] as? ChatMessage {
+                    print("📬 Room Listing: Message from room: \(message.roomId), sender: \(message.sender)")
+                }
+                // Refresh immediately without throttle for instant updates
+                Task {
+                    await self.refreshRooms()
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func setupForegroundListener() {
+        // Refresh when app comes to foreground
+        NotificationCenter.default
+            .publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { _ in
+                print("📬 Room Listing: App entering foreground - refreshing room list")
+                Task {
+                    await self.refreshRooms()
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    // MARK: - Periodic Refresh
+    private func startPeriodicRefresh() {
+        // Refresh every 3 seconds for near-instant updates
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            Task {
+                await self.refreshRooms()
+            }
+        }
+    }
+    
+    private func stopPeriodicRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+    
+    // MARK: - Smart Refresh
+    private func refreshRoomsIfNeeded() async {
+        // Only refresh if last refresh was more than 0.5 seconds ago
+        // This prevents excessive API calls while still being responsive
+        let now = Date()
+        guard now.timeIntervalSince(lastRefreshTime) > 0.5 else {
+            print("📬 Room Listing: Skipping refresh - too recent")
+            return
+        }
+        await refreshRooms()
+    }
+    
+    private func refreshRooms() async {
+        guard let token = KeychainService.shared.getToken() else {
+            return
+        }
+        
+        lastRefreshTime = Date()
+        
+        do {
+            let rooms = try await roomService.getRooms(token: token)
+            await MainActor.run {
+                // Sort rooms by last message timestamp (most recent first)
+                self.availableRooms = rooms.sorted { room1, room2 in
+                    guard let timestamp1 = room1.lastMessage?.parsedTimestamp else {
+                        return false
+                    }
+                    guard let timestamp2 = room2.lastMessage?.parsedTimestamp else {
+                        return true
+                    }
+                    return timestamp1 > timestamp2
+                }
+                print("✅ Room list refreshed successfully - \(rooms.count) rooms")
+            }
+        } catch {
+            // Silently fail on refresh to avoid disrupting user experience
+            print("❌ Failed to refresh rooms: \(error)")
         }
     }
     
@@ -179,6 +292,16 @@ struct ChatRoomView: View {
                 
                 await MainActor.run {
                     self.availableRooms.append(newRoom)
+                    // Re-sort rooms after adding a new one
+                    self.availableRooms = self.availableRooms.sorted { room1, room2 in
+                        guard let timestamp1 = room1.lastMessage?.parsedTimestamp else {
+                            return false
+                        }
+                        guard let timestamp2 = room2.lastMessage?.parsedTimestamp else {
+                            return true
+                        }
+                        return timestamp1 > timestamp2
+                    }
                     self.newRoomName = ""
                 }
                 
@@ -201,14 +324,55 @@ struct RoomRowView: View {
                     .font(.headline)
                     .foregroundColor(.primary)
                 
-                Text("Tap to join")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if let lastMessage = room.lastMessage, !lastMessage.message.isEmpty {
+                    HStack(spacing: 4) {
+                        Text("\(lastMessage.sender):")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fontWeight(.medium)
+                        Text(lastMessage.message)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text("No messages yet")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .italic()
+                }
             }
             
             Spacer()
+            
+            if let lastMessage = room.lastMessage, let timestamp = lastMessage.parsedTimestamp {
+                Text(formatTimestamp(timestamp))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
         .padding(.vertical, 8)
+    }
+    
+    private func formatTimestamp(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        if calendar.isDateInToday(date) {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            return formatter.string(from: date)
+        } else if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        } else if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE" // Day name
+            return formatter.string(from: date)
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            return formatter.string(from: date)
+        }
     }
 }
 

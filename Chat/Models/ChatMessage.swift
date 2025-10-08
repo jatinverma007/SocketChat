@@ -83,8 +83,11 @@ struct ChatMessage: Codable, Identifiable {
     let messageType: MessageType
     var reactions: [ReactionSummary] // Store reaction data
     var userReaction: ReactionType? // Current user's reaction to this message
+    var isEncrypted: Bool // Whether the message is encrypted
+    var encryptedContent: String? // Encrypted payload (if encrypted)
+    var encryptionVersion: String? // Encryption version (e.g., "AES-256-GCM")
     
-    init(id: String = UUID().uuidString, serverMessageId: Int? = nil, roomId: String, sender: String, message: String, timestamp: Date = Date(), attachment: Attachment? = nil, messageType: MessageType = .text, reactions: [ReactionSummary] = [], userReaction: ReactionType? = nil) {
+    init(id: String = UUID().uuidString, serverMessageId: Int? = nil, roomId: String, sender: String, message: String, timestamp: Date = Date(), attachment: Attachment? = nil, messageType: MessageType = .text, reactions: [ReactionSummary] = [], userReaction: ReactionType? = nil, isEncrypted: Bool = false, encryptedContent: String? = nil, encryptionVersion: String? = nil) {
         self.id = id
         self.serverMessageId = serverMessageId
         self.roomId = roomId
@@ -95,6 +98,9 @@ struct ChatMessage: Codable, Identifiable {
         self.messageType = messageType
         self.reactions = reactions
         self.userReaction = userReaction
+        self.isEncrypted = isEncrypted
+        self.encryptedContent = encryptedContent
+        self.encryptionVersion = encryptionVersion
     }
 }
 
@@ -185,6 +191,11 @@ struct ServerMessage: Codable {
     // Reaction data (optional for backward compatibility)
     let reactions: [ReactionSummary]?
     let user_reaction: String?
+    
+    // Encryption data (optional)
+    let is_encrypted: Bool?
+    let encrypted_content: String?
+    let encryption_version: String?
     
     // Convert to ChatMessage
     func toChatMessage() -> ChatMessage {
@@ -295,17 +306,36 @@ struct ServerMessage: Codable {
             print("🔖 ServerMessage.toChatMessage(): No reactions in server response")
         }
         
+        // Handle encryption
+        let isEncrypted = is_encrypted ?? false
+        var finalMessage = message
+        
+        if isEncrypted, let encryptedContent = encrypted_content {
+            print("🔐 ServerMessage: Encrypted message received, attempting decryption...")
+            do {
+                let decryptedMessage = try EncryptionManager.shared.decryptMessage(encryptedContent)
+                finalMessage = decryptedMessage
+                print("✅ ServerMessage: Message decrypted successfully")
+            } catch {
+                print("❌ ServerMessage: Decryption failed - \(error.localizedDescription)")
+                finalMessage = "🔒 [Encrypted message - unable to decrypt]"
+            }
+        }
+        
         return ChatMessage(
             id: "server_\(message_id)", // Use server message ID as local ID for consistency
             serverMessageId: message_id, // Use server's message ID for reactions
             roomId: String(room_id),
             sender: sender,
-            message: message,
+            message: finalMessage,
             timestamp: date,
             attachment: attachment,
             messageType: messageType,
             reactions: reactions ?? [], // Use reactions from server or empty array
-            userReaction: userReaction // Use user reaction from server
+            userReaction: userReaction, // Use user reaction from server
+            isEncrypted: isEncrypted,
+            encryptedContent: encrypted_content,
+            encryptionVersion: encryption_version
         )
     }
 }

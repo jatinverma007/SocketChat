@@ -39,6 +39,14 @@ struct ServerConfig {
     static let reactionsRoom = "\(httpBaseURL)/api/reactions/room"
     static let reactionsAvailable = "\(httpBaseURL)/api/reactions/available"
     
+    // MARK: - Encryption Endpoints
+    static let encryptionUploadKey = "\(httpBaseURL)/api/encryption/keys/upload"
+    static let encryptionMyKey = "\(httpBaseURL)/api/encryption/keys/me"
+    static func encryptionRoomKeys(_ roomId: String) -> String {
+        return "\(httpBaseURL)/api/encryption/keys/room/\(roomId)"
+    }
+    static let encryptionSendMessage = "\(httpBaseURL)/api/encryption/messages/send-encrypted"
+    
     // MARK: - File Configuration
     static let maxFileSize = 10 * 1024 * 1024 // 10MB in bytes
     

@@ -162,6 +162,24 @@ struct ChatView: View {
         }
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 4) {
+                    if chatViewModel.isEncryptionEnabled {
+                        Image(systemName: "lock.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                    } else {
+                        Image(systemName: "lock.open.fill")
+                            .foregroundColor(.orange)
+                            .font(.caption)
+                    }
+                    Text(chatViewModel.isEncryptionEnabled ? "E2EE" : "")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
         .onAppear {
             chatViewModel.joinRoom(room)
         }

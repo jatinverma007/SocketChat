@@ -114,6 +114,17 @@ struct ChatRoomView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack {
+                        // Setup Encryption Button
+                        Button(action: {
+                            Task {
+                                await chatViewModel.initializeEncryption()
+                            }
+                        }) {
+                            Image(systemName: "lock.shield")
+                                .font(.title2)
+                                .foregroundColor(.green)
+                        }
+                        
                         // Create Room Button
                         Button(action: {
                             showingCreateRoom = true
@@ -149,6 +160,10 @@ struct ChatRoomView: View {
             setupMessageListener()
             setupForegroundListener()
             startPeriodicRefresh()
+            // Initialize encryption if not already done
+            Task {
+                await chatViewModel.initializeEncryption()
+            }
         }
         .onDisappear {
             stopPeriodicRefresh()

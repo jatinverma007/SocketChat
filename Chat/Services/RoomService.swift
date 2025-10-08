@@ -133,7 +133,7 @@ class RoomService: ObservableObject {
     
     // MARK: - Mark Messages as Read
     func markMessagesAsRead(roomId: String, token: String) async throws {
-        let url = URL(string: "\(ServerConfig.rooms)/\(roomId)/read")!
+        let url = URL(string: "\(ServerConfig.rooms)/\(roomId)/mark-read")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

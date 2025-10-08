@@ -454,9 +454,18 @@ struct TextOnlyBubble: View {
     let textColor: Color
     
     var body: some View {
-        Text(message.message)
-            .font(.body)
-            .foregroundColor(textColor)
+        HStack(alignment: .top, spacing: 6) {
+            if message.isEncrypted {
+                Image(systemName: "lock.fill")
+                    .font(.caption2)
+                    .foregroundColor(textColor.opacity(0.7))
+                    .padding(.leading, 12)
+                    .padding(.top, 8)
+            }
+            Text(message.message)
+                .font(.body)
+                .foregroundColor(textColor)
+            }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(bubbleColor)

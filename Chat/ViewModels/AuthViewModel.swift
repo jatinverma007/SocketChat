@@ -30,6 +30,11 @@ class AuthViewModel: ObservableObject {
             // Create a user object with stored data
             currentUser = User(id: UUID().uuidString, username: username, token: token)
             isAuthenticated = true
+            
+            // Setup encryption for existing session
+            Task {
+                await setupEncryption(authToken: token)
+            }
         }
     }
     
@@ -61,6 +66,11 @@ class AuthViewModel: ObservableObject {
                 currentUser = user
                 isAuthenticated = true
                 isLoading = false
+                
+                // Upload public key for end-to-end encryption
+                Task {
+                    await setupEncryption(authToken: authResponse.token)
+                }
                 
             } catch {
                 isLoading = false
@@ -103,10 +113,27 @@ class AuthViewModel: ObservableObject {
                 isAuthenticated = true
                 isLoading = false
                 
+                // Upload public key for end-to-end encryption
+                Task {
+                    await setupEncryption(authToken: authResponse.token)
+                }
+                
             } catch {
                 isLoading = false
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+    
+    // MARK: - Setup Encryption
+    private func setupEncryption(authToken: String) async {
+        do {
+            print("🔐 Setting up end-to-end encryption...")
+            try await EncryptionManager.shared.uploadPublicKeyToServer(authToken: authToken)
+            print("✅ Encryption setup complete")
+        } catch {
+            print("⚠️ Encryption setup failed: \(error.localizedDescription)")
+            // Don't block login if encryption setup fails
         }
     }
     

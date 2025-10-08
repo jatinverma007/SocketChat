@@ -18,13 +18,18 @@ class ChatViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var typingUsers: Set<String> = [] // Track who is typing
+    @Published var isEncryptionEnabled = false // Whether encryption is enabled for current room
+    @Published var encryptionStatus: String = "" // Status message for encryption
     
     private let messageService = MessageService()
     private let roomService = RoomService()
     private let webSocketManager = ChatWebSocketManager()
     private let reactionService = ReactionService.shared
     private let keychainService = KeychainService.shared
+    private let encryptionManager = EncryptionManager.shared
+    private let encryptedMessageService = EncryptedMessageService.shared
     private var cancellables = Set<AnyCancellable>()
+    private var roomPublicKeys: [String] = []
     
     init() {
         setupWebSocketSubscriptions()
@@ -179,6 +184,70 @@ class ChatViewModel: ObservableObject {
         
         // Load previous messages
         loadPreviousMessages(for: room.id)
+        
+        // Setup encryption for the room
+        Task {
+            await setupEncryptionForRoom(room.id)
+        }
+    }
+    
+    // MARK: - Setup Encryption (Public method)
+    /// Call this to initialize encryption for the current user
+    func initializeEncryption() async {
+        guard let token = keychainService.getToken() else {
+            print("❌ No auth token available for encryption setup")
+            return
+        }
+        
+        do {
+            print("🔐 ChatViewModel: Initializing encryption...")
+            try await encryptionManager.uploadPublicKeyToServer(authToken: token)
+            print("✅ ChatViewModel: Encryption initialized successfully")
+            
+            // If we're in a room, refresh encryption for that room
+            if let room = currentRoom {
+                await setupEncryptionForRoom(room.id)
+            }
+        } catch {
+            print("❌ ChatViewModel: Failed to initialize encryption: \(error)")
+        }
+    }
+    
+    // MARK: - Setup Encryption (Private method)
+    private func setupEncryptionForRoom(_ roomId: String) async {
+        guard let token = keychainService.getToken() else {
+            await MainActor.run {
+                self.encryptionStatus = "❌ No auth token"
+                self.isEncryptionEnabled = false
+            }
+            return
+        }
+        
+        do {
+            // Fetch public keys for all users in the room
+            print("🔐 ChatViewModel: Fetching room keys for room: \(roomId)...")
+            let keys = try await encryptionManager.fetchRoomKeys(roomId: roomId, authToken: token)
+            
+            await MainActor.run {
+                self.roomPublicKeys = keys
+                self.isEncryptionEnabled = !keys.isEmpty
+                self.encryptionStatus = keys.isEmpty ? "⚠️ No keys available" : "🔒 Encryption ready (\(keys.count) users)"
+                
+                if keys.isEmpty {
+                    print("⚠️ ChatViewModel: No public keys found for room \(roomId)")
+                    print("⚠️ ChatViewModel: Make sure users in this room have logged in to upload their keys")
+                } else {
+                    print("✅ ChatViewModel: Encryption setup complete - \(keys.count) public keys loaded")
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.isEncryptionEnabled = false
+                self.encryptionStatus = "⚠️ Encryption unavailable"
+                print("❌ ChatViewModel: Failed to setup encryption: \(error)")
+                print("❌ ChatViewModel: Error details: \(error.localizedDescription)")
+            }
+        }
     }
     
     func leaveRoom() {
@@ -244,14 +313,31 @@ class ChatViewModel: ObservableObject {
             return
         }
         
+        // Check if encryption is enabled and keys are available
+        if isEncryptionEnabled && !roomPublicKeys.isEmpty {
+            print("🔐 Encryption enabled - sending encrypted message")
+            sendEncryptedMessage(text)
+            return
+        }
+        
+        // Fall back to unencrypted message
+        print("⚠️ Encryption not available - sending unencrypted message")
+        sendUnencryptedMessage(text)
+    }
+    
+    // MARK: - Send Unencrypted Message
+    private func sendUnencryptedMessage(_ text: String) {
+        guard let room = currentRoom else { return }
+        
         let message = ChatMessage(
-            id: "local_\(UUID().uuidString)", // Generate consistent local ID
+            id: "local_\(UUID().uuidString)",
             roomId: room.id,
             sender: keychainService.getUsername() ?? "Unknown",
             message: text.trimmingCharacters(in: .whitespacesAndNewlines),
             messageType: .text,
             reactions: [],
-            userReaction: nil
+            userReaction: nil,
+            isEncrypted: false
         )
         
         // Add message to local array immediately for better UX
@@ -263,6 +349,68 @@ class ChatViewModel: ObservableObject {
         
         // Stop typing indicator when message is sent
         sendTypingIndicator(isTyping: false)
+    }
+    
+    // MARK: - Send Encrypted Message
+    private func sendEncryptedMessage(_ text: String) {
+        guard let room = currentRoom,
+              let token = keychainService.getToken() else {
+            return
+        }
+        
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Show placeholder immediately for better UX
+        let placeholderMessage = ChatMessage(
+            id: "local_\(UUID().uuidString)",
+            roomId: room.id,
+            sender: keychainService.getUsername() ?? "Unknown",
+            message: trimmedText,
+            messageType: .text,
+            reactions: [],
+            userReaction: nil,
+            isEncrypted: true
+        )
+        messages.append(placeholderMessage)
+        
+        Task {
+            do {
+                // Encrypt the message
+                print("🔐 Encrypting message with \(roomPublicKeys.count) recipient keys...")
+                let encryptedContent = try encryptionManager.encryptMessage(
+                    trimmedText,
+                    forRecipients: roomPublicKeys
+                )
+                
+                // Send encrypted message to server via API
+                print("🔐 Sending encrypted message to server...")
+                _ = try await encryptedMessageService.sendEncryptedMessage(
+                    roomId: room.id,
+                    encryptedContent: encryptedContent,
+                    token: token
+                )
+                
+                print("✅ Encrypted message sent successfully")
+                
+                // Stop typing indicator
+                await MainActor.run {
+                    self.sendTypingIndicator(isTyping: false)
+                }
+                
+            } catch {
+                print("❌ Failed to send encrypted message: \(error)")
+                await MainActor.run {
+                    // Remove placeholder and show error
+                    if let index = self.messages.firstIndex(where: { $0.id == placeholderMessage.id }) {
+                        self.messages.remove(at: index)
+                    }
+                    self.errorMessage = "Failed to send encrypted message: \(error.localizedDescription)"
+                    
+                    // Fall back to unencrypted
+                    self.sendUnencryptedMessage(trimmedText)
+                }
+            }
+        }
     }
     
     // MARK: - Send Message with Attachment
